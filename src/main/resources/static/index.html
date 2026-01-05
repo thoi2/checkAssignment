@@ -101,8 +101,9 @@
             .replaceAll("'","&#039;");
     }
 
+    // ✅ 에러는 message만 노출하도록 request() 수정
     async function request(path, { method = "GET", body = undefined } = {}) {
-        const options = { method, headers: {} };
+        const options = { method, headers: { "Accept": "application/json" } };
 
         if (body !== undefined) {
             options.headers["Content-Type"] = "application/json";
@@ -119,13 +120,13 @@
         const data = isJson ? await res.json() : await res.text();
 
         if (!res.ok) {
-            // 백엔드가 {code,message} 형태면 여기로 들어옴
             if (isJson && data && typeof data === "object") {
-                const code = data.code ?? ("HTTP_" + res.status);
+                // 백엔드가 {code,message}면 message만 사용
                 const msg = data.message ?? "요청 실패";
-                throw new Error(`[${code}] ${msg}`);
+                throw new Error(msg);
             }
-            throw new Error(String(data || res.status));
+            // HTML(Whitelabel) 같은 긴 텍스트는 그대로 노출하지 않기
+            throw new Error(`요청 실패 (HTTP ${res.status})`);
         }
 
         return data;

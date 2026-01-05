@@ -54,7 +54,6 @@ public class ExtensionService {
             throw new AppException(ErrorCode.FIXED_EXTENSION_TOGGLE_NOT_ALLOWED);
         }
 
-        // 낙관락 충돌(ObjectOptimisticLockingFailureException)은 글로벌에서 409로 변환
         ext.toggleBlocked();
     }
 
@@ -72,7 +71,7 @@ public class ExtensionService {
             throw new AppException(ErrorCode.CUSTOM_EXTENSION_LIMIT_EXCEEDED);
         }
 
-        // 커스텀 확장자는 “차단 리스트 추가” 성격 → blocked=true로 시작
+        // 커스텀 확장자는 blocked=true로 시작
         extensionRepository.save(new Extension(normalized, false, true));
     }
 
@@ -89,7 +88,6 @@ public class ExtensionService {
             throw new AppException(ErrorCode.FIXED_EXTENSION_DELETE_NOT_ALLOWED);
         }
 
-        // 낙관락 충돌(ObjectOptimisticLockingFailureException)은 글로벌에서 409로 변환
         extensionRepository.delete(ext);
     }
 
@@ -107,16 +105,26 @@ public class ExtensionService {
                 .orElseGet(() -> FileCheckResponse.ok(derived));
     }
 
+
     private static String normalize(String s) {
-        return s == null ? "" : s.trim().toLowerCase();
+        if (s == null) return "";
+        // 전체 공백 제거(중간 공백 포함) 후 소문자화
+        return s.replaceAll("\\s+", "").toLowerCase();
     }
 
     private static void validateExtensionName(String normalized) {
-        // 1~20, 공백/점 제외 (요구사항 맞춘 최소 검증)
+        // 1~20
         if (normalized.isBlank() || normalized.length() > 20) {
             throw new AppException(ErrorCode.INVALID_EXTENSION_NAME);
         }
-        if (normalized.contains(" ") || normalized.contains(".")) {
+
+        // 점은 금지
+        if (normalized.contains(".")) {
+            throw new AppException(ErrorCode.INVALID_EXTENSION_NAME);
+        }
+
+        // 최종 저장 값은 영문/숫자만 허용
+        if (!normalized.matches("^[a-z0-9]+$")) {
             throw new AppException(ErrorCode.INVALID_EXTENSION_NAME);
         }
     }
