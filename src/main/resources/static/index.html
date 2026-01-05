@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Extension Manager</title>
+    <style>
+        :root { --bd:#e5e7eb; --fg:#111827; --muted:#6b7280; --bg:#f9fafb; --card:#ffffff; }
+        body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif; background:var(--bg); color:var(--fg); }
+        .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        h1 { font-size: 20px; margin: 0 0 16px; }
+        .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+        @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+        .card { background:var(--card); border:1px solid var(--bd); border-radius: 12px; padding: 16px; }
+        .title { display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .title h2 { font-size: 16px; margin: 0; }
+        .muted { color: var(--muted); font-size: 12px; }
+        .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
+        input[type="text"] { height: 36px; padding: 0 10px; border:1px solid var(--bd); border-radius: 10px; outline:none; min-width: 200px; }
+        button { height: 36px; padding: 0 12px; border:1px solid var(--bd); border-radius: 10px; background:#111827; color:white; cursor:pointer; }
+        button.secondary { background:#fff; color:#111827; }
+        button.danger { background:#b91c1c; border-color:#b91c1c; }
+        button:disabled { opacity: 0.6; cursor:not-allowed; }
+        .list { display:flex; flex-direction: column; gap: 8px; }
+        .fixed-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+        @media (min-width: 520px) { .fixed-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        .chk { display:flex; gap: 8px; align-items: center; padding: 8px 10px; border:1px solid var(--bd); border-radius: 10px; }
+        .tag { display:inline-flex; align-items:center; gap: 8px; padding: 6px 10px; border:1px solid var(--bd); border-radius: 999px; background:#fff; }
+        .tag code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .tag button { height: 26px; padding: 0 8px; border-radius: 999px; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .result { margin-top: 10px; padding: 10px; border:1px solid var(--bd); border-radius: 10px; background:#fff; }
+        .ok { color:#047857; }
+        .no { color:#b91c1c; }
+        .bar { height:1px; background:var(--bd); margin: 12px 0; }
+    </style>
+</head>
+
+<body>
+<div class="wrap">
+    <h1>확장자 차단 관리</h1>
+
+    <div class="grid">
+        <section class="card">
+            <div class="title">
+                <h2>고정 확장자</h2>
+                <span class="muted">체크 = 차단</span>
+            </div>
+            <div id="fixedList" class="fixed-grid"></div>
+            <div class="bar"></div>
+            <button id="reloadBtn" class="secondary" type="button">새로고침</button>
+        </section>
+
+        <section class="card">
+            <div class="title">
+                <h2>커스텀 확장자</h2>
+                <span id="customMeta" class="muted">0/200</span>
+            </div>
+
+            <div class="row">
+                <input id="customInput" type="text" placeholder="예: zip" maxlength="20" />
+                <button id="addCustomBtn" type="button">추가</button>
+            </div>
+
+            <div style="height:10px"></div>
+            <div id="customList" class="row"></div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1;">
+            <div class="title">
+                <h2>파일명 검사</h2>
+                <span class="muted">filename만 체크</span>
+            </div>
+
+            <div class="row">
+                <input id="filenameInput" type="text" placeholder="예: hello.exe" maxlength="255" style="min-width: 320px;" />
+                <button id="checkBtn" type="button">검사</button>
+            </div>
+
+            <div id="checkResult" class="result" style="display:none;"></div>
+        </section>
+    </div>
+</div>
+
+<script>
+    const BASE = "";
+
+    const $ = (sel) => document.querySelector(sel);
+
+    const state = {
+        fixed: [],
+        custom: { count: 0, limit: 200, items: [] }
+    };
+
+    function escapeHtml(str) {
+        return String(str)
+            .replaceAll("&","&amp;")
+            .replaceAll("<","&lt;")
+            .replaceAll(">","&gt;")
+            .replaceAll('"',"&quot;")
+            .replaceAll("'","&#039;");
+    }
+
+    async function request(path, { method = "GET", body = undefined } = {}) {
+        const options = { method, headers: {} };
+
+        if (body !== undefined) {
+            options.headers["Content-Type"] = "application/json";
+            options.body = JSON.stringify(body);
+        }
+
+        const res = await fetch(BASE + path, options);
+
+        // 204는 바디 없음
+        if (res.status === 204) return null;
+
+        const ct = res.headers.get("content-type") || "";
+        const isJson = ct.includes("application/json");
+        const data = isJson ? await res.json() : await res.text();
+
+        if (!res.ok) {
+            // 백엔드가 {code,message} 형태면 여기로 들어옴
+            if (isJson && data && typeof data === "object") {
+                const code = data.code ?? ("HTTP_" + res.status);
+                const msg = data.message ?? "요청 실패";
+                throw new Error(`[${code}] ${msg}`);
+            }
+            throw new Error(String(data || res.status));
+        }
+
+        return data;
+    }
+
+    function renderFixed() {
+        const root = $("#fixedList");
+        root.innerHTML = "";
+
+        state.fixed.forEach(item => {
+            const el = document.createElement("label");
+            el.className = "chk";
+            el.innerHTML = `
+        <input type="checkbox" ${item.blocked ? "checked" : ""} data-name="${escapeHtml(item.name)}"/>
+        <span class="mono">${escapeHtml(item.name)}</span>
+      `;
+            root.appendChild(el);
+        });
+
+        // 이벤트 바인딩
+        root.querySelectorAll("input[type=checkbox]").forEach(chk => {
+            chk.addEventListener("change", async (e) => {
+                const name = e.target.getAttribute("data-name");
+                e.target.disabled = true;
+                try {
+                    await request(`/api/extensions/fixed/${encodeURIComponent(name)}/toggle`, { method: "PATCH" });
+                    await loadAll();
+                } catch (err) {
+                    alert(err.message);
+                    // 실패하면 체크 상태 되돌리기 위해 전체 reload
+                    await loadAll();
+                } finally {
+                    e.target.disabled = false;
+                }
+            });
+        });
+    }
+
+    function renderCustom() {
+        $("#customMeta").textContent = `${state.custom.count}/${state.custom.limit}`;
+
+        const root = $("#customList");
+        root.innerHTML = "";
+
+        state.custom.items.forEach(item => {
+            const tag = document.createElement("div");
+            tag.className = "tag";
+            tag.innerHTML = `
+        <code>${escapeHtml(item.name)}</code>
+        <button class="danger" type="button" data-name="${escapeHtml(item.name)}">삭제</button>
+      `;
+            root.appendChild(tag);
+        });
+
+        root.querySelectorAll("button[data-name]").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                const name = e.target.getAttribute("data-name");
+                e.target.disabled = true;
+                try {
+                    await request(`/api/extensions/custom/${encodeURIComponent(name)}`, { method: "DELETE" });
+                    await loadAll();
+                } catch (err) {
+                    alert(err.message);
+                } finally {
+                    e.target.disabled = false;
+                }
+            });
+        });
+    }
+
+    function renderCheckResult(result) {
+        const box = $("#checkResult");
+        box.style.display = "block";
+
+        if (result.allowed) {
+            box.innerHTML = `
+        <div class="ok"><b>허용</b> (확장자: <span class="mono">${escapeHtml(result.derivedExtension || "")}</span>)</div>
+        <div class="muted">reason: ${escapeHtml(result.reason || "OK")}</div>
+      `;
+        } else {
+            box.innerHTML = `
+        <div class="no"><b>차단</b> (확장자: <span class="mono">${escapeHtml(result.derivedExtension || "")}</span>)</div>
+        <div class="muted">reason: ${escapeHtml(result.reason || "")}</div>
+      `;
+        }
+    }
+
+    async function loadAll() {
+        const data = await request("/api/extensions");
+        state.fixed = data.fixed ?? [];
+        state.custom = data.custom ?? { count: 0, limit: 200, items: [] };
+
+        renderFixed();
+        renderCustom();
+    }
+
+    async function addCustom() {
+        const input = $("#customInput");
+        const name = (input.value || "").trim();
+
+        if (!name) {
+            alert("확장자를 입력하세요.");
+            return;
+        }
+
+        $("#addCustomBtn").disabled = true;
+        try {
+            await request("/api/extensions/custom", { method: "POST", body: { name } });
+            input.value = "";
+            await loadAll();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            $("#addCustomBtn").disabled = false;
+        }
+    }
+
+    async function checkFile() {
+        const filename = ($("#filenameInput").value || "").trim();
+        if (!filename) {
+            alert("filename을 입력하세요.");
+            return;
+        }
+
+        $("#checkBtn").disabled = true;
+        try {
+            const result = await request("/api/files/check", { method: "POST", body: { filename } });
+            renderCheckResult(result);
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            $("#checkBtn").disabled = false;
+        }
+    }
+
+    // 이벤트
+    $("#reloadBtn").addEventListener("click", loadAll);
+    $("#addCustomBtn").addEventListener("click", addCustom);
+    $("#customInput").addEventListener("keydown", (e) => { if (e.key === "Enter") addCustom(); });
+    $("#checkBtn").addEventListener("click", checkFile);
+    $("#filenameInput").addEventListener("keydown", (e) => { if (e.key === "Enter") checkFile(); });
+
+    // 초기 로드
+    loadAll().catch(err => alert(err.message));
+</script>
+</body>
+</html>
