@@ -2,9 +2,13 @@
 
 ## 기술 스택
 Backend: Spring Boot 3.x + JPA + MySQL 8.0
+
 Build: Gradle 9.2.1
+
 Container: Docker Compose
+
 Deploy: AWS EC2 t3.small (서울 리전)
+
 Frontend: Vanilla JS + HTML/CSS
 
 
